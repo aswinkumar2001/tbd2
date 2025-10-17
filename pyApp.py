@@ -5,6 +5,47 @@ from datetime import datetime
 import zipfile
 from io import BytesIO
 
+# Function to generate timestamps
+def generate_timestamps():
+    start = datetime(2024, 1, 1, 0, 0)
+    end = datetime(2025, 8, 31, 23, 30)
+    timestamps = pd.date_range(start=start, end=end, freq='30T')
+    return timestamps
+
+# Function to validate uploaded file
+def validate_uploaded_file(df):
+    if df.shape[1] != 1:
+        raise ValueError("Uploaded Excel must have exactly one column with no header.")
+    if df.empty:
+        raise ValueError("Uploaded Excel is empty.")
+    return df[0].unique().tolist()  # Get unique meters
+
+# Function to create the full DataFrame
+def create_full_df(meters, timestamps):
+    meters_df = pd.DataFrame({'Asset name': meters})
+    timestamps_df = pd.DataFrame({'Timestamp': timestamps})
+    full_df = meters_df.merge(timestamps_df, how='cross')
+    full_df['KPI Trigger'] = 1
+    full_df['Timestamp'] = full_df['Timestamp'].dt.strftime('%d/%m/%Y %H:%M')
+    full_df = full_df.sort_values(['Asset name', 'Timestamp']).reset_index(drop=True)
+    return full_df
+
+# Function to validate the generated DataFrame
+def validate_df(full_df, meters, timestamps):
+    grouped = full_df.groupby('Asset name')
+    if len(grouped) != len(meters):
+        raise ValueError("Mismatch in number of meters.")
+    for meter, group in grouped:
+        group_timestamps = pd.to_datetime(group['Timestamp'], format='%d/%m/%Y %H:%M')
+        group_timestamps = group_timestamps.sort_values()
+        expected_timestamps = pd.Series(timestamps)
+        if not group_timestamps.equals(expected_timestamps):
+            raise ValueError(f"Timestamp sequence incomplete or duplicated for meter: {meter}")
+        if group['KPI Trigger'].ne(1).any():
+            raise ValueError(f"Invalid KPI Trigger values for meter: {meter}")
+    if full_df.duplicated(subset=['Asset name', 'Timestamp']).any():
+        raise ValueError("Duplicated entries found.")
+
 # Add progress tracking
 def main():
     st.title("Virtual Meter Data Generator App")
@@ -140,3 +181,8 @@ def main():
                 except Exception as e:
                     st.error(f"❌ An unexpected error occurred: {str(e)}")
                     st.info("💡 Please check your file format and try again.")
+    else:
+        st.info("Please upload an Excel file to proceed.")
+
+if __name__ == "__main__":
+    main()
